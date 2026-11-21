@@ -192,6 +192,64 @@ class Hand:
     def print_state(self):
         print("Cards: " + ", ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]))
 
+    def play_turn(self, game: GamePile, deck: Deck):
+            #TODO: Implement Secrecy
+            game.print_state()
+            self.print_state()
+            if game.skip_next_player:
+                print("Turn Skipped")
+                game.skip_next_player = False
+                return
+            
+            if game.draw_count > 0:
+                print(f"You have to draw {game.draw_count} cards")
+                while game.draw_count > 0:
+                    print("Drawing Card...")
+                    self.pick_from_deck(deck)
+                    #TODO: Print drawn card
+                    game.draw_count -= 1
+                print("Final Cards:")
+                self.print_state()
+                print("Moving to next person")
+                return
+    
+            # Loop until complete turn
+            has_drawn: bool = False
+            while True:
+                index = 0
+                try:
+                    index = int(input(f"What card do you want to play (0 to {"pass" if has_drawn else "draw"})? ")) - 1
+
+                    if index == -1: # Drawing or passing
+                        if has_drawn:
+                            print("Passing...")
+                            print("Moving to next player")
+                            break
+
+                        else:
+                            print("Drawing...")
+                            self.pick_from_deck(deck)
+                            has_drawn = True
+                            # TODO: print drawn card
+                            self.print_state()
+                            continue
+
+                    else: # Selected a card
+                        if game.can_place_card(self.cards[index]):
+                            self.play_card(game, index)
+                            break
+
+                        else:
+                            raise ValueError("Can't place this card")
+
+                except ValueError as e:
+                    print(e)
+                    print("Pick another card:")
+                    self.print_state()
+                    continue
+        
+            return
+
     
 
         
@@ -226,41 +284,12 @@ while True:
     elif player_index == len(players):
         player_index = 0
 
-    if game.skip_next_player:
-        print("Skipping")
-        player_index += game.dir
-        game.skip_next_player = False
-        continue
 
     player = players[player_index]
     print("\n")
     print(f"{player[0]}'s turn")
-    if game.draw_count > 0:
-        print(f"You have to draw {game.draw_count} cards")
-        print("Drawing cards...")
-        while game.draw_count > 0:
-            player[1].pick_from_deck(deck)
-            game.draw_count -= 1
-        player_index += game.dir
-        continue
-    game.print_state()
-    player[1].print_state()
-    while True:
-        try:
-            index = int(input("What card do you want to play (0 to draw)? ")) - 1
-            if index == -1:
-                print("Drawing...")
-                player[1].pick_from_deck(deck)
-                player[1].print_state()
-                continue
-            else:
-                player[1].play_card(game, index)
-        except ValueError as e:
-            print(e)
-            print("Pick another card:")
-            player[1].print_state()
-            continue
-        break
+    
+    player[1].play_turn(game, deck)
     
     if len(player[1].cards) == 0:
         print(f"{player[0]} wins")
