@@ -4,14 +4,14 @@ from collections.abc import Iterable
 import copy
 
 card_types: str = ["red", "green", "blue", "yellow", "special"]
-card_vals: int | str = [*range(10), "+2", "reverse", "skip", "wild", "+4"]
+card_vals: list[int | str] = [*range(10), "+2", "reverse", "skip", "wild", "+4"]
 
 class Card:
     class Type:
         def __init__(self, color: str | int):
             color = color.lower()
             if color not in card_types:
-                raise ValueError("Unexpected argument to Color constructor")
+                raise ValueError(f"Unexpected value: {color}")
             self.value = color
 
         def __eq__(self, other: object):
@@ -41,7 +41,7 @@ class Card:
             if isinstance(value, str):
                 value = value.lower()
             if value not in card_vals:
-                raise ValueError("Unexpected value in Card.Value.__init__()")
+                raise ValueError(f"Unexpected value: {value}")
             self.value: str | int = value
         def __eq__(self, other: object):
             if not isinstance(other, Card.Value): return NotImplemented
@@ -129,9 +129,9 @@ class GamePile:
         self.last_color: Card.Type = starting_card.type
         self.last_value: Card.Value = starting_card.value
         self.draw_count: int = 0
-        self.dir: int = 1 # 1 or -1
-        self.skip_next_player = False
-        self.player_played_card = False
+        self.dir: int = 1 # Gameplay direction (1 or -1)
+        self.skip_next_player: bool = False
+        self.direction_reversed: bool = False # Used to turn reverse cards into skips if game only has two players
     
     def place(self, card: Card):
         if not self.can_place_card(card):
@@ -149,16 +149,16 @@ class GamePile:
                     game.last_color = Card.Type(new_color.lower())
                     break
 
-        if card.value == Card.Value("+2"):
-            self.draw_count = 2
-        elif card.value == Card.Value("+4"):
-            self.draw_count = 4
-
-        if card.value == Card.Value("reverse"):
-            self.dir *= -1
-
-        if card.value == Card.Value("skip"):
-            self.skip_next_player = True
+        match card.value.value:
+            case "+2":
+                self.draw_count = 2
+            case "+4":
+                self.draw_count = 4
+            case "reverse":
+                self.dir *= -1
+                self.direction_reversed = True
+            case "skip":
+                self.skip_next_player = True
             
     def can_place_card(self, card: Card):
         if card.type == Card.Type("special"):
@@ -290,6 +290,10 @@ while True:
     print(f"{player[0]}'s turn")
     
     player[1].play_turn(game, deck)
+    if game.direction_reversed:
+        if len(players) == 2:
+            game.skip_next_player = True
+        game.direction_reversed = False
     
     if len(player[1].cards) == 0:
         print(f"{player[0]} wins")
@@ -303,7 +307,6 @@ while True:
         
 
 
-# TODO: card effects, reverse acts like skip in 2 player
 # TODO: Game Menu
 # TODO: Bots
 
