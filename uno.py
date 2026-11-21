@@ -128,6 +128,10 @@ class GamePile:
         self.cards: deque[Card] = deque([starting_card])
         self.last_color: Card.Type = starting_card.type
         self.last_value: Card.Value = starting_card.value
+        self.draw_count: int = 0
+        self.dir: int = 1 # 1 or -1
+        self.skip_next_player = False
+        self.player_played_card = False
     
     def place(self, card: Card):
         if not self.can_place_card(card):
@@ -136,6 +140,26 @@ class GamePile:
         self.last_color = card.type
         self.last_value = card.value
 
+        if game.last_color == Card.Type("special"):
+            while True:
+                new_color = input(f"Pick next color ({", ".join(card_types[0:-1])}): ").strip()
+                if new_color.lower() not in card_types[0:-1]:
+                    print("Invalid color")
+                else:
+                    game.last_color = Card.Type(new_color.lower())
+                    break
+
+        if card.value == Card.Value("+2"):
+            self.draw_count = 2
+        elif card.value == Card.Value("+4"):
+            self.draw_count = 4
+
+        if card.value == Card.Value("reverse"):
+            self.dir *= -1
+
+        if card.value == Card.Value("skip"):
+            self.skip_next_player = True
+            
     def can_place_card(self, card: Card):
         if card.type == Card.Type("special"):
             return True
@@ -145,9 +169,11 @@ class GamePile:
         if self.last_value == card.value:
             return True
         return False
+    
+    def print_state(self):
+        extra_str: str = "" if self.cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
+        print(f"Last Card: {self.cards[-1]}{extra_str}")
 
-        
-        
 
 class Hand:
     def __init__(self, cards: Iterable[Card] | None = None):
@@ -160,7 +186,15 @@ class Hand:
         self.cards.append(deck.get_top_card())
 
     def play_card(self, game: GamePile, card_index: int):
-        game.place(self.cards.pop(card_index))
+        game.place(self.cards[card_index])
+        self.cards.pop(card_index)
+
+    def print_state(self):
+        print("Cards: " + ", ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]))
+
+    
+
+        
 
 
 
@@ -177,6 +211,70 @@ while card.type == Card.Type("special") or card.value not in [Card.Value(i) for 
 
 print(f"Starting card: {card}")
 
+game: GamePile = GamePile(card)
+
+players: list[list[str | Hand]] = [[f"Player{i+1}", Hand([deck.cards.pop() for _ in range(7)])] for i in range(2)]
 
 
-deck.shuffle()
+player_index = 0
+player_direction = 1
+
+# Circle between players
+while True:
+    if player_index == -1:
+        player_index = len(players)-1
+    elif player_index == len(players):
+        player_index = 0
+
+    if game.skip_next_player:
+        print("Skipping")
+        player_index += game.dir
+        game.skip_next_player = False
+        continue
+
+    player = players[player_index]
+    print("\n")
+    print(f"{player[0]}'s turn")
+    if game.draw_count > 0:
+        print(f"You have to draw {game.draw_count} cards")
+        print("Drawing cards...")
+        while game.draw_count > 0:
+            player[1].pick_from_deck(deck)
+            game.draw_count -= 1
+        player_index += game.dir
+        continue
+    game.print_state()
+    player[1].print_state()
+    while True:
+        try:
+            index = int(input("What card do you want to play (0 to draw)? ")) - 1
+            if index == -1:
+                print("Drawing...")
+                player[1].pick_from_deck(deck)
+                player[1].print_state()
+                continue
+            else:
+                player[1].play_card(game, index)
+        except ValueError as e:
+            print(e)
+            print("Pick another card:")
+            player[1].print_state()
+            continue
+        break
+    
+    if len(player[1].cards) == 0:
+        print(f"{player[0]} wins")
+        break
+
+    player_index += game.dir
+
+
+
+    
+        
+
+
+# TODO: card effects, reverse acts like skip in 2 player
+# TODO: Game Menu
+# TODO: Bots
+
