@@ -2,9 +2,21 @@ import random
 from collections import deque
 from collections.abc import Iterable
 import copy
+import time
+import sys
 
 card_types: list[str] = ["red", "green", "blue", "yellow", "special"]
 card_vals: list[int | str] = [*range(10), "+2", "reverse", "skip", "wild", "+4"]
+
+game_settings: dict = {
+    "players": [
+        "Player1",
+        "Player2"
+    ],
+    "num_bots": 0
+}
+
+ANSI_CLEAR = "\033[H\033[2J\033[3J"
 
 class Card:
     class Type:
@@ -88,12 +100,12 @@ class Card:
     def __format__(self, format_spec: str):
         return f"{self.type:{format_spec}} {self.value:{format_spec}}"
 
-class GamePile:
+class Game:
     def __init__(self, starting_card: Card):
         if starting_card.type == Card.Type("special") or starting_card.value not in [Card.Value(i) for i in range(10)]:
             raise ValueError("Invalid Starting Card")
         
-        self.cards: deque[Card] = deque([starting_card])
+        self.played_cards: deque[Card] = deque([starting_card])
         self.last_color: Card.Type = starting_card.type
         self.last_value: Card.Value = starting_card.value
         self.draw_count: int = 0
@@ -104,7 +116,7 @@ class GamePile:
     def place(self, card: Card):
         if not self.can_place_card(card):
             raise ValueError("Invalid Card Placed")
-        self.cards.append(card)
+        self.played_cards.append(card)
         self.last_color = card.type
         self.last_value = card.value
 
@@ -140,14 +152,14 @@ class GamePile:
 
     def pop_buried_cards(self):
         buried_cards = []
-        while len(self.cards) > 1:
-            buried_cards.append(self.cards.popleft())
+        while len(self.played_cards) > 1:
+            buried_cards.append(self.played_cards.popleft())
 
         return buried_cards
     
     def print_state(self):
-        extra_str: str = "" if self.cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
-        print(f"Last Card: {self.cards[-1]}{extra_str}")
+        extra_str: str = "" if self.played_cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
+        print(f"Last Card: {self.played_cards[-1]}{extra_str}")
 
 class Deck:
     def __init__(self):
@@ -171,7 +183,7 @@ class Deck:
             self.full_card_set.append(Card(Card.Type("special"), Card.Value("+4")))
 
         self.cards: deque[Card] = copy.deepcopy(self.full_card_set)
-        self.game_pile: GamePile | None = None # For restocking
+        self.game_pile: Game | None = None # For restocking
 
     def get_top_card(self):
         if len(self.cards) > 0:
@@ -198,13 +210,20 @@ class Deck:
     def shuffle(self):
         random.shuffle(self.cards)
 
-
 class Hand:
-    def __init__(self, cards: Iterable[Card] | None = None):
+    def __init__(self, cards: Iterable[Card] = [], deck: Deck | None = None):
         if cards:
             self.cards: list[Card] = list(cards)
+        elif deck is not None:
+            self.cards = []
+            for _ in range(7):
+                card = deck.get_top_card()
+                if card is None:
+                    raise RuntimeError("Ran out of cards")
+                else:
+                    self.cards.append(card)
         else:
-            self.cards: list[Card] = []
+            self.cards = []
 
     def pick_from_deck(self, deck: Deck):
         card: Card | None = deck.get_top_card()
@@ -215,14 +234,14 @@ class Hand:
             print("Couldn't pick card")
             return None
 
-    def play_card(self, game: GamePile, card_index: int):
+    def play_card(self, game: Game, card_index: int):
         game.place(self.cards[card_index])
         self.cards.pop(card_index)
 
     def print_state(self):
         print("Cards:\n  " + "\n  ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]) + "\n")
 
-    def play_turn(self, game: GamePile, deck: Deck):
+    def play_turn(self, game: Game, deck: Deck):
             game.print_state()
             self.print_state()
             if game.skip_next_player:
@@ -272,6 +291,7 @@ class Hand:
                         raise IndexError("Negative Index")
                     else: # Selected a card
                         if game.can_place_card(self.cards[index]):
+                            print(f"Played {self.cards.index}")
                             self.play_card(game, index)
                             break
 
@@ -287,83 +307,227 @@ class Hand:
                     if index < -1:
                         print(f"Can't input \"{index+1}\": Negative Index")
                     else:
-                        print(f"Selected Index out of bounds: Picked {index} when there's only {len(self.cards)} cards")
+                        print(f"Selected Index out of bounds: Picked {index+1} when there's only {len(self.cards)} cards")
                     print("Repick Card:")
                     self.print_state()
                     continue
         
             return
 
+def user_select_number_in_range(prompt: str, min: int, max: int):
+    while True:
+        response = input(prompt)
+
+        try:
+            num = int(response)
+        except ValueError as e:
+            print(f"Couldn't understand \"{response}\". Try again")
+            continue
+
+        if num not in range(min, max+1):
+            print(f"{num} not in range {min}-{max}. Try again")
+            continue
+
+        return num
+
+def print_welcome():
+    print(ANSI_CLEAR, end="", flush=True)
+    print("Welcome To Terminal-Based UNO")
+    print()
+    print("Default Settings:")
+    print(f"  Number of players: {len(game_settings["players"])}")
+    print(f"  Number of bots: {game_settings["num_bots"]}")
+    print(f"  ...")
+    print()
+    input("Press Enter to continue")
+
+
+def game_menu():
+    while True:
+        print(ANSI_CLEAR, end="", flush=True)
+        print("Game Menu:")
+        options = [
+            ["Play game", init_game],
+            ["Edit Settings", edit_settings],
+            ["Quit Game", quit_game]
+        ]
+
+        for i, option in enumerate(options):
+            print(f"  {i+1}: {option[0]}")
+
+        index = user_select_number_in_range("Select an option: ", 1, len(options)) - 1
+        options[index][1]()
+            
+
+def edit_settings():
+    global game_settings
+
+    while True:
+        print(ANSI_CLEAR, end="", flush=True)
+        print("Edit Settings:")
+        print(f"  1: Edit Players:")
+        print(f"      Number of Players: {len(game_settings["players"])}")
+        print(f"      Player Names:")
+        for name in game_settings["players"]:
+            print(f"        \"{name}\"")
+        print()
+        print(f"  2: Number of bots: {game_settings["num_bots"]}")
+
+        
+        option_num = user_select_number_in_range("Select what to edit (0 to exit): ", 0, 2)
+        if option_num == 0:
+            return
+        elif option_num == 1:
+            edit_player_settings()
+        elif option_num == 2:
+            num_bots = user_select_number_in_range("How many bots would you like (0-10)? ", 0, 10)
+            game_settings["num_bots"] = num_bots
+
+def edit_player_settings():
+    while True:
+        print(ANSI_CLEAR, end="", flush=True)
+        print("Player names:")
+        for i, name in enumerate(game_settings["players"]):
+            print(f"  {i+1}: {name}")
+
+        print()
+        print("Options:")
+        print("  1: Edit player name")
+        print("  2: Add player")
+        print("  3: Remove player")
+        option_num = user_select_number_in_range("Select option (0 to exit): ", 0, 3)
+
+        match option_num:
+            case 0:
+                print()
+                return
+            case 1:
+                player_index = user_select_number_in_range("Choose player to edit (0 to exit): ", 0, len(game_settings["players"])) - 1
+                if player_index == -1:
+                    continue
+                new_name = input(f"Rename \"{game_settings["players"][player_index]}\" to (Leave blank to cancel): ").strip()
+                if not new_name:
+                    continue
+                game_settings["players"][player_index] = new_name
+                print(f"Player renamed to \"{game_settings["players"][player_index]}\"\n")
+
+            case 2:
+                name = input("Enter player name (Leave blank to cancel): ").strip()
+                if not name:
+                    continue
+                game_settings["players"].append(name)
+                print(f"Added player \"{game_settings["players"][-1]}\"\n")
+            
+            case 3:
+                player_index = user_select_number_in_range("Choose player to remove (0 to exit): ", 0, len(game_settings["players"])) - 1
+                if player_index == -1:
+                    continue
+                name = game_settings["players"].pop(player_index)
+
+                print(f"Player \"{name}\" removed\n")
+
+def init_game():
+    global deck, game, players, game_settings, player_index
+    loading_speed = .4
+    print("Preparing Game", end="")
+    for _ in range(3):
+        time.sleep(loading_speed)
+        print(".", end="", flush=True)
+    print()
+
+    print("Shuffling Deck", end="")
+    deck = Deck()
+    deck.shuffle()
+    for _ in range(3):
+        time.sleep(loading_speed)
+        print(".", end="", flush=True)
+    print()
+
+    print("Selecting starting card", end="")
+    for _ in range(3):
+            time.sleep(loading_speed)
+            print(".", end="", flush=True)
+    print()
+
+    card: Card | None = deck.get_top_card()
+    if card is None:
+        raise RuntimeError("Can't pick starting card: Deck is empty")
+
+    rejected_starting_cards = []
+    while card.type == Card.Type("special") or card.value not in [Card.Value(i) for i in range(10)]:
+        print(f"{card} rejected as starting card")
+        time.sleep(loading_speed*2)
+        rejected_starting_cards.append(card)
+        card = deck.get_top_card()
+        if card is None:
+            raise RuntimeError("No suitable starting card found")
+
+    while len(rejected_starting_cards) > 0:
+        deck.return_card_to_bottom(rejected_starting_cards.pop(0))
+
+    print(f"Starting card: {card}\n")
+    time.sleep(loading_speed*2)
+
+    game = Game(card)
+    deck.game_pile = game
+
+    players.clear()
+    for name in game_settings["players"]:
+        players.append([name, Hand(deck=deck)])
+
+    player_index = 0
+
+    game_loop()
+
+def game_loop():
+    global deck, game, players, player_index
+    while True:
+        if player_index == -1:
+            player_index = len(players)-1
+        elif player_index == len(players):
+            player_index = 0
+
+        player = players[player_index]
+        print(f"{player[0]}'s turn")
+        input("Start Turn? (Enter to continue)")
+
+        player[1].play_turn(game, deck)
+
+        input("\nEnd Turn? (Enter to continue)")
+        print(ANSI_CLEAR, end="", flush=True)
+        if game.direction_recently_reversed:
+            if len(players) == 2:
+                game.skip_next_player = True
+            game.direction_recently_reversed = False
+
+        if len(player[1].cards) == 0:
+            print(f"{player[0]} wins")
+            break
     
+        player_index += game.dir
+
+def quit_game():
+    print("\nThanks for playing!")
+    sys.exit()
+
 
 deck: Deck = Deck()
-# print([f"[{card.type: short},{card.value: short}]" for card in deck.cards])
-deck.shuffle()
 
-card: Card | None = deck.get_top_card()
-if card is None:
-    raise RuntimeError("Can't pick starting card: Deck is empty")
+# Initialize game with a dummy starter card
+game: Game = Game(Card(Card.Type("red"), Card.Value(0)))
 
-rejected_starting_cards = []
-while card.type == Card.Type("special") or card.value not in [Card.Value(i) for i in range(10)]:
-    print(f"{card} rejected as starting card")
-    rejected_starting_cards.append(card)
-    card = deck.get_top_card()
-    if card is None:
-        raise RuntimeError("No suitable starting card found")
-
-while len(rejected_starting_cards) > 0:
-    deck.return_card_to_bottom(rejected_starting_cards.pop(0))
-
-print(f"Starting card: {card}\n")
-
-game: GamePile = GamePile(card)
-deck.game_pile = game
-
-players: list[list[str | Hand]] = [[f"Player{i+1}", Hand([deck.cards.pop() for _ in range(7)])] for i in range(2)]
-
+players: list[list[str | Hand]] = []
 
 player_index = 0
-player_direction = 1
-
-# Circle between players
-while True:
-    if player_index == -1:
-        player_index = len(players)-1
-    elif player_index == len(players):
-        player_index = 0
 
 
-    player = players[player_index]
-    print(f"{player[0]}'s turn")
-    input("Start Turn? (Enter to continue)")
+if __name__ == "__main__":
+    try:
+        print_welcome()
+        game_menu()
+    except KeyboardInterrupt:
+        quit_game()
 
-    player[1].play_turn(game, deck)
-
-    input("\nEnd Turn? (Enter to continue)")
-    print("\033[H\033[2J\033[3J", end="", flush=True)
-    if game.direction_recently_reversed:
-        if len(players) == 2:
-            game.skip_next_player = True
-        game.direction_recently_reversed = False
-
-    
-    if len(player[1].cards) == 0:
-        print(f"{player[0]} wins")
-        break
-
-    player_index += game.dir
-
-
-
-    
-        
-
-
-# TODO: Game Menu
-#           Select number of players
-#           Custom player names
-#           Select number of bots
 # TODO: Better card visualization (e.g. ascii art + colored text vs "red 5")
 # TODO: Implement logs so players can see what other have done despite secrecy
 # TODO: Bots
