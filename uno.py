@@ -3,7 +3,7 @@ from collections import deque
 from collections.abc import Iterable
 import copy
 
-card_types: str = ["red", "green", "blue", "yellow", "special"]
+card_types: list[str] = ["red", "green", "blue", "yellow", "special"]
 card_vals: list[int | str] = [*range(10), "+2", "reverse", "skip", "wild", "+4"]
 
 class Card:
@@ -51,7 +51,7 @@ class Card:
         def __str__(self):
             return str(self.value).capitalize()
 
-        def __repr(self):
+        def __repr__(self):
             return f"Card.Value({self.value})"
 
         def __format__(self, format_spec: str):
@@ -73,7 +73,7 @@ class Card:
         self.type: Card.Type = color
         self.value: Card.Value = value
 
-    def __eq___(self, other: object):
+    def __eq__(self, other: object):
         if not isinstance(other, Card):
             return NotImplemented
         elif self.value != other.value or self.type != other.type: return False
@@ -87,6 +87,67 @@ class Card:
     
     def __format__(self, format_spec: str):
         return f"{self.type:{format_spec}} {self.value:{format_spec}}"
+
+class GamePile:
+    def __init__(self, starting_card: Card):
+        if starting_card.type == Card.Type("special") or starting_card.value not in [Card.Value(i) for i in range(10)]:
+            raise ValueError("Invalid Starting Card")
+        
+        self.cards: deque[Card] = deque([starting_card])
+        self.last_color: Card.Type = starting_card.type
+        self.last_value: Card.Value = starting_card.value
+        self.draw_count: int = 0
+        self.dir: int = 1 # Gameplay direction (1 or -1)
+        self.skip_next_player: bool = False
+        self.direction_recently_reversed: bool = False # Used to turn reverse cards into skips if game only has two players
+    
+    def place(self, card: Card):
+        if not self.can_place_card(card):
+            raise ValueError("Invalid Card Placed")
+        self.cards.append(card)
+        self.last_color = card.type
+        self.last_value = card.value
+
+        if self.last_color == Card.Type("special"):
+            while True:
+                new_color = input(f"Pick next color ({", ".join(card_types[0:-1])}): ").strip()
+                if new_color.lower() not in card_types[0:-1]:
+                    print("Invalid color")
+                else:
+                    self.last_color = Card.Type(new_color.lower())
+                    break
+
+        match card.value.value:
+            case "+2":
+                self.draw_count = 2
+            case "+4":
+                self.draw_count = 4
+            case "reverse":
+                self.dir *= -1
+                self.direction_recently_reversed = True
+            case "skip":
+                self.skip_next_player = True
+            
+    def can_place_card(self, card: Card):
+        if card.type == Card.Type("special"):
+            return True
+        
+        if self.last_color == card.type:
+            return True
+        if self.last_value == card.value:
+            return True
+        return False
+
+    def pop_buried_cards(self):
+        buried_cards = []
+        while len(self.cards) > 1:
+            buried_cards.append(self.cards.popleft())
+
+        return buried_cards
+    
+    def print_state(self):
+        extra_str: str = "" if self.cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
+        print(f"Last Card: {self.cards[-1]}{extra_str}")
 
 class Deck:
     def __init__(self):
@@ -110,69 +171,32 @@ class Deck:
             self.full_card_set.append(Card(Card.Type("special"), Card.Value("+4")))
 
         self.cards: deque[Card] = copy.deepcopy(self.full_card_set)
+        self.game_pile: GamePile | None = None # For restocking
 
     def get_top_card(self):
-        return self.cards.pop()
+        if len(self.cards) > 0:
+            return self.cards.pop()
+        else:
+            print("Deck Empty")
+            if self.game_pile is None:
+                print("No GamePile available to refill from")
+                return None
+            else:
+                new_cards = self.game_pile.pop_buried_cards()
+                self.cards.extend(new_cards)
+                self.shuffle()
+                if len(self.cards) == 0:
+                    print("Failed to restock deck: game pile empty")
+                    return None
+                else:
+                    print("Restocked deck from game pile")
+                    return self.cards.pop()
 
-    def return_card(self, card: Card):
+    def return_card_to_bottom(self, card: Card):
         self.cards.appendleft(card)
 
     def shuffle(self):
         random.shuffle(self.cards)
-
-class GamePile:
-    def __init__(self, starting_card: Card):
-        if starting_card.type == Card.Type("special") or starting_card.value not in [Card.Value(i) for i in range(10)]:
-            raise ValueError("Invalid Starting Card")
-        
-        self.cards: deque[Card] = deque([starting_card])
-        self.last_color: Card.Type = starting_card.type
-        self.last_value: Card.Value = starting_card.value
-        self.draw_count: int = 0
-        self.dir: int = 1 # Gameplay direction (1 or -1)
-        self.skip_next_player: bool = False
-        self.direction_reversed: bool = False # Used to turn reverse cards into skips if game only has two players
-    
-    def place(self, card: Card):
-        if not self.can_place_card(card):
-            raise ValueError("Invalid Card Placed")
-        self.cards.append(card)
-        self.last_color = card.type
-        self.last_value = card.value
-
-        if game.last_color == Card.Type("special"):
-            while True:
-                new_color = input(f"Pick next color ({", ".join(card_types[0:-1])}): ").strip()
-                if new_color.lower() not in card_types[0:-1]:
-                    print("Invalid color")
-                else:
-                    game.last_color = Card.Type(new_color.lower())
-                    break
-
-        match card.value.value:
-            case "+2":
-                self.draw_count = 2
-            case "+4":
-                self.draw_count = 4
-            case "reverse":
-                self.dir *= -1
-                self.direction_reversed = True
-            case "skip":
-                self.skip_next_player = True
-            
-    def can_place_card(self, card: Card):
-        if card.type == Card.Type("special"):
-            return True
-        
-        if self.last_color == card.type:
-            return True
-        if self.last_value == card.value:
-            return True
-        return False
-    
-    def print_state(self):
-        extra_str: str = "" if self.cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
-        print(f"Last Card: {self.cards[-1]}{extra_str}")
 
 
 class Hand:
@@ -183,7 +207,13 @@ class Hand:
             self.cards: list[Card] = []
 
     def pick_from_deck(self, deck: Deck):
-        self.cards.append(deck.get_top_card())
+        card: Card | None = deck.get_top_card()
+        if card is not None:
+            self.cards.append(card)
+            return card
+        else:
+            print("Couldn't pick card")
+            return None
 
     def play_card(self, game: GamePile, card_index: int):
         game.place(self.cards[card_index])
@@ -193,7 +223,6 @@ class Hand:
         print("Cards: " + ", ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]))
 
     def play_turn(self, game: GamePile, deck: Deck):
-            #TODO: Implement Secrecy
             game.print_state()
             self.print_state()
             if game.skip_next_player:
@@ -205,8 +234,12 @@ class Hand:
                 print(f"You have to draw {game.draw_count} cards")
                 while game.draw_count > 0:
                     print("Drawing Card...")
-                    self.pick_from_deck(deck)
-                    #TODO: Print drawn card
+                    drawn_card: Card | None = self.pick_from_deck(deck)
+                    if drawn_card is None:
+                        print("Couldn't draw from deck")
+                        break
+                    else:
+                        print(f"You drew: {drawn_card}")
                     game.draw_count -= 1
                 print("Final Cards:")
                 self.print_state()
@@ -228,12 +261,15 @@ class Hand:
 
                         else:
                             print("Drawing...")
-                            self.pick_from_deck(deck)
+                            draw_successful: bool = self.pick_from_deck(deck)
+                            if not draw_successful:
+                                print("Couldn't draw from deck")
                             has_drawn = True
                             # TODO: print drawn card
                             self.print_state()
                             continue
-
+                    elif index < -1:
+                        raise IndexError("Negative Index")
                     else: # Selected a card
                         if game.can_place_card(self.cards[index]):
                             self.play_card(game, index)
@@ -245,6 +281,14 @@ class Hand:
                 except ValueError as e:
                     print(e)
                     print("Pick another card:")
+                    self.print_state()
+                    continue
+                except IndexError as e:
+                    if index < -1:
+                        print(f"Can't input \"{index+1}\": Negative Index")
+                    else:
+                        print(f"Selected Index out of bounds: Picked {index} when there's only {len(self.cards)} cards")
+                    print("Repick Card:")
                     self.print_state()
                     continue
         
@@ -261,15 +305,25 @@ deck: Deck = Deck()
 # print([f"[{card.type: short},{card.value: short}]" for card in deck.cards])
 deck.shuffle()
 
-card: Card = deck.get_top_card()
+card: Card | None = deck.get_top_card()
+if card is None:
+    raise RuntimeError("Can't pick starting card: Deck is empty")
+
+rejected_starting_cards = []
 while card.type == Card.Type("special") or card.value not in [Card.Value(i) for i in range(10)]:
     print(f"{card} rejected as starting card")
-    deck.return_card(card)
+    rejected_starting_cards.append(card)
     card = deck.get_top_card()
+    if card is None:
+        raise RuntimeError("No suitable starting card found")
+
+while len(rejected_starting_cards) > 0:
+    deck.return_card_to_bottom(rejected_starting_cards.pop(0))
 
 print(f"Starting card: {card}")
 
 game: GamePile = GamePile(card)
+deck.game_pile = game
 
 players: list[list[str | Hand]] = [[f"Player{i+1}", Hand([deck.cards.pop() for _ in range(7)])] for i in range(2)]
 
@@ -290,10 +344,12 @@ while True:
     print(f"{player[0]}'s turn")
     
     player[1].play_turn(game, deck)
-    if game.direction_reversed:
+
+    if game.direction_recently_reversed:
         if len(players) == 2:
             game.skip_next_player = True
-        game.direction_reversed = False
+        game.direction_recently_reversed = False
+
     
     if len(player[1].cards) == 0:
         print(f"{player[0]} wins")
@@ -307,6 +363,11 @@ while True:
         
 
 
+# TODO: Implement secrecy (Players can't see others cards via terminal clearing and waiting for player consent before displaying card info)
 # TODO: Game Menu
+#           Select number of players
+#           Custom player names
+#           Select number of bots
+# TODO: Better card visualization (e.g. ascii art + colored text vs "red 5")
 # TODO: Bots
 
