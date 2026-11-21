@@ -220,7 +220,7 @@ class Hand:
         self.cards.pop(card_index)
 
     def print_state(self):
-        print("Cards: " + ", ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]))
+        print("Cards:\n  " + "\n  ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]) + "\n")
 
     def play_turn(self, game: GamePile, deck: Deck):
             game.print_state()
@@ -255,17 +255,17 @@ class Hand:
 
                     if index == -1: # Drawing or passing
                         if has_drawn:
-                            print("Passing...")
-                            print("Moving to next player")
+                            print("Passed Turn")
                             break
 
                         else:
                             print("Drawing...")
-                            draw_successful: bool = self.pick_from_deck(deck)
-                            if not draw_successful:
+                            drawn_card: Card | None = self.pick_from_deck(deck)
+                            if drawn_card is None:
                                 print("Couldn't draw from deck")
+                            else:
+                                print(f"You drew: {drawn_card}")
                             has_drawn = True
-                            # TODO: print drawn card
                             self.print_state()
                             continue
                     elif index < -1:
@@ -296,11 +296,6 @@ class Hand:
 
     
 
-        
-
-
-
-
 deck: Deck = Deck()
 # print([f"[{card.type: short},{card.value: short}]" for card in deck.cards])
 deck.shuffle()
@@ -320,7 +315,7 @@ while card.type == Card.Type("special") or card.value not in [Card.Value(i) for 
 while len(rejected_starting_cards) > 0:
     deck.return_card_to_bottom(rejected_starting_cards.pop(0))
 
-print(f"Starting card: {card}")
+print(f"Starting card: {card}\n")
 
 game: GamePile = GamePile(card)
 deck.game_pile = game
@@ -340,11 +335,13 @@ while True:
 
 
     player = players[player_index]
-    print("\n")
     print(f"{player[0]}'s turn")
-    
+    input("Start Turn? (Enter to continue)")
+
     player[1].play_turn(game, deck)
 
+    input("\nEnd Turn? (Enter to continue)")
+    print("\033[H\033[2J\033[3J", end="", flush=True)
     if game.direction_recently_reversed:
         if len(players) == 2:
             game.skip_next_player = True
@@ -363,11 +360,11 @@ while True:
         
 
 
-# TODO: Implement secrecy (Players can't see others cards via terminal clearing and waiting for player consent before displaying card info)
 # TODO: Game Menu
 #           Select number of players
 #           Custom player names
 #           Select number of bots
 # TODO: Better card visualization (e.g. ascii art + colored text vs "red 5")
+# TODO: Implement logs so players can see what other have done despite secrecy
 # TODO: Bots
 
