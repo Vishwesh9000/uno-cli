@@ -11,7 +11,7 @@ cd uno-cli
 ```
 2. Run the game:
 ```
-python uno.py
+python main.py
 ```
 ## Features
 - Special Unicode characters and ANSI color codes to make visually appealing graphical cards and a fun player experience
