@@ -4,23 +4,52 @@ from collections.abc import Iterable
 import copy
 import time
 import sys
+import shutil
+
+# special Unicode Art Chars: ─│┌┐└┘
+
+ANSI_CLEAR_SCREEN = "\033[H\033[2J\033[3J"
+ANSI_RESET = "\033[0m"
+ANSI_GREY = "\033[90m"
+ANSI_RED = "\033[31m"
+ANSI_GREEN = "\033[32m"
+ANSI_YELLOW = "\033[33m"
+ANSI_BLUE = "\033[34m"
+
+LOADING_TIME = .4
+
+game_settings: dict = {
+    "players": [
+        "Player1"
+    ],
+    "num_bots": 1,
+    "enable_unicode_graphics": True,
+    "supervise_bots": False
+}
+
 
 card_types: list[str] = ["red", "green", "blue", "yellow", "special"]
 card_vals: list[int | str] = [*range(10), "+2", "reverse", "skip", "wild", "+4"]
 
-game_settings: dict = {
-    "players": [
-        "Player1",
-        "Player2"
-    ],
-    "num_bots": 0
+str_to_ansi_color: dict[str, str] = {
+    "grey": ANSI_GREY,
+    "red": ANSI_RED,
+    "green": ANSI_GREEN,
+    "yellow": ANSI_YELLOW,
+    "blue": ANSI_BLUE,
+    "special": ANSI_GREY # For special cards like wild and +4
 }
 
-ANSI_CLEAR = "\033[H\033[2J\033[3J"
 
+def mock_loading(prompt: str, repeats: int, progress_time: float = LOADING_TIME):
+        print(prompt, end="", flush=True)
+        for _ in range(repeats):
+            time.sleep(progress_time)
+            print(".", end="", flush=True)
+        print()
 class Card:
     class Type:
-        def __init__(self, color: str | int):
+        def __init__(self, color: str):
             color = color.lower()
             if color not in card_types:
                 raise ValueError(f"Unexpected value: {color}")
@@ -39,14 +68,15 @@ class Card:
 
         def __format__(self, format_spec: str):
             format_spec = format_spec.strip()
-            if format_spec == "short":
-                return self.value[0].upper()
-            elif format_spec == "long":
-                return self.value.capitalize()
-            elif format_spec == "":
-                return self.__str__()
-            else:
-                raise ValueError(f"Unknown format specifier: \"{format_spec}\"")
+            match format_spec:
+                case "short":
+                    return self.value[0].upper()
+                case "long":
+                    return self.value.capitalize()
+                case "":
+                    return self.__str__()
+                case _:
+                    raise ValueError(f"Unknown format specifier: \"{format_spec}\"")
 
     class Value:
         def __init__(self, value: str | int):
@@ -69,17 +99,26 @@ class Card:
         def __format__(self, format_spec: str):
             format_spec = format_spec.strip()
             t: str = str(self.value)
-            if format_spec == "short":
-                if len(t) > 2:
-                    return t[0].upper()
-                else:
-                    return t
-            elif format_spec == "long":
-                return t.capitalize()
-            elif format_spec == "":
-                return self.__str__()
-            else:
-                raise ValueError(f"Unknown format specifier: \"{format_spec}\"")
+            match format_spec:
+                case "short":
+                    if len(t) > 2:
+                        return t[0].upper()
+                    else:
+                        return t
+                case "long":
+                    return t.capitalize()
+                case "two_char":
+                    if isinstance(self.value, int):
+                        return f"{self.value:02d}"
+                    match self.value:
+                        case "+2" | "+4": return self.value
+                        case "reverse": return "RV"
+                        case "skip": return "SK"
+                        case "wild": return "WC"
+                case "":
+                    return self.__str__()
+                case _:
+                    raise ValueError(f"Unknown format specifier: \"{format_spec}\"")
 
     def __init__(self, color: Type, value: Value):
         self.type: Card.Type = color
@@ -113,7 +152,7 @@ class Game:
         self.skip_next_player: bool = False
         self.direction_recently_reversed: bool = False # Used to turn reverse cards into skips if game only has two players
     
-    def place(self, card: Card):
+    def place(self, card: Card, next_color: Card.Type | None = None):
         if not self.can_place_card(card):
             raise ValueError("Invalid Card Placed")
         self.played_cards.append(card)
@@ -121,13 +160,20 @@ class Game:
         self.last_value = card.value
 
         if self.last_color == Card.Type("special"):
-            while True:
-                new_color = input(f"Pick next color ({", ".join(card_types[0:-1])}): ").strip()
-                if new_color.lower() not in card_types[0:-1]:
-                    print("Invalid color")
-                else:
-                    self.last_color = Card.Type(new_color.lower())
-                    break
+            if next_color is None:
+                while True:
+                    colors_prompt = ", ".join(
+                        [f"{str_to_ansi_color[color]}{color}{ANSI_RESET}" if game_settings["enable_unicode_graphics"] else "" for color in card_types[0:-1]]
+                    )
+                    new_color = input(f"Pick next color ({colors_prompt}): ").strip()
+                    if new_color.lower() not in card_types[0:-1]:
+                        print(f"Invalid color: \"{new_color}\"")
+                        print("Try again")
+                    else:
+                        self.last_color = Card.Type(new_color.lower())
+                        break
+            else:
+                self.last_color = next_color
 
         match card.value.value:
             case "+2":
@@ -158,8 +204,11 @@ class Game:
         return buried_cards
     
     def print_state(self):
-        extra_str: str = "" if self.played_cards[-1].type != Card.Type("special") else f" (Color to play: {self.last_color.value.capitalize()})"
-        print(f"Last Card: {self.played_cards[-1]}{extra_str}")
+        
+        extra_str: str = "" if self.played_cards[-1].type != Card.Type("special") \
+                            else f" (Color to play: {str_to_ansi_color[self.last_color.value]}{self.last_color.value.capitalize()}{ANSI_RESET})"
+        # print(f"Last Card: {self.played_cards[-1]}{extra_str}")
+        print("Last Card: " + convert_card_format(self.played_cards[-1]) + " " + extra_str)
 
 class Deck:
     def __init__(self):
@@ -191,7 +240,7 @@ class Deck:
         else:
             print("Deck Empty")
             if self.game_pile is None:
-                print("No GamePile available to refill from")
+                print("No game pile available to refill from")
                 return None
             else:
                 new_cards = self.game_pile.pop_buried_cards()
@@ -211,7 +260,8 @@ class Deck:
         random.shuffle(self.cards)
 
 class Hand:
-    def __init__(self, cards: Iterable[Card] = [], deck: Deck | None = None):
+    def __init__(self, cards: Iterable[Card] | None = None, deck: Deck | None = None, is_bot: bool = False):
+        self.is_bot: bool = is_bot
         if cards:
             self.cards: list[Card] = list(cards)
         elif deck is not None:
@@ -231,26 +281,29 @@ class Hand:
             self.cards.append(card)
             return card
         else:
-            print("Couldn't pick card")
             return None
 
-    def play_card(self, game: Game, card_index: int):
-        game.place(self.cards[card_index])
+    def play_card(self, game: Game, card_index: int, next_color: Card.Type | None = None):
+        game.place(self.cards[card_index], next_color=next_color)
         self.cards.pop(card_index)
 
     def print_state(self):
-        print("Cards:\n  " + "\n  ".join([f"{i+1}: {card}" for i, card in enumerate(self.cards)]) + "\n")
+        print_string = "Cards: "
+        for i, card in enumerate(self.cards):
+            print_string += f"{i+1}: " + convert_card_format(card) + " "
+        print(print_string)
 
     def play_turn(self, game: Game, deck: Deck):
             game.print_state()
-            self.print_state()
+            if not self.is_bot or game_settings["supervise_bots"]:
+                self.print_state()
             if game.skip_next_player:
                 print("Turn Skipped")
                 game.skip_next_player = False
                 return
             
             if game.draw_count > 0:
-                print(f"You have to draw {game.draw_count} cards")
+                print(f"Draw {game.draw_count} cards")
                 while game.draw_count > 0:
                     print("Drawing Card...")
                     drawn_card: Card | None = self.pick_from_deck(deck)
@@ -258,11 +311,14 @@ class Hand:
                         print("Couldn't draw from deck")
                         break
                     else:
-                        print(f"You drew: {drawn_card}")
+                        # print(f"You drew: {drawn_card}")
+                        if not self.is_bot or game_settings["supervise_bots"]:
+                            print("You drew: " + convert_card_format(drawn_card))
                     game.draw_count -= 1
-                print("Final Cards:")
-                self.print_state()
-                print("Moving to next person")
+                if not self.is_bot or game_settings["supervise_bots"]:
+                    print("Final Cards:")
+                    self.print_state()
+                print("Moving to next player")
                 return
     
             # Loop until complete turn
@@ -270,7 +326,40 @@ class Hand:
             while True:
                 index = 0
                 try:
-                    index = int(input(f"What card do you want to play (0 to {"pass" if has_drawn else "draw"})? ")) - 1
+                    index = -1
+                    next_color: Card.Type | None = None
+                    if self.is_bot:
+                        for i in range(len(self.cards)):
+                            if game.can_place_card(self.cards[i]):
+                                index = i
+                                bot_message = random.choice([
+                                    "Thinking",
+                                    "Analyzing probabilities",
+                                    "Calculating your cards",
+                                    "Peeking at your cards",
+                                    "Becoming sentient",
+                                    "Considering alternate universes",
+                                    "Asking ChatGPT for advice",
+                                    "Simulating 14,000,605 outcomes",
+                                    "Consulting StackOverflow",
+                                    "Bribing the random number generator"
+                                ])
+                                mock_loading(bot_message, 3)
+                                if self.cards[index].type == Card.Type("special"):
+                                    card_counts: dict[str, int] = {color: 0 for color in card_types[0:-1]}
+                                    for card in self.cards:
+                                        if card.type.value in card_counts.keys():
+                                            card_counts[card.type.value] += 1
+                                    max_count = 0
+                                    next_color = Card.Type("red")
+                                    for key, val in card_counts.items():
+                                        if val > max_count:
+                                            max_count = val
+                                            next_color = Card.Type(key)
+                                break
+                    else:
+                        # index = int(input(f"What card do you want to play (0 to {'pass' if has_drawn else 'draw'})? ")) - 1
+                        index = user_select_number_in_range(f"What card do you want to play (0 to {'pass' if has_drawn else 'draw'})? ", 0, len(self.cards)) - 1
 
                     if index == -1: # Drawing or passing
                         if has_drawn:
@@ -278,21 +367,23 @@ class Hand:
                             break
 
                         else:
-                            print("Drawing...")
+                            mock_loading("Drawing", 3)
                             drawn_card: Card | None = self.pick_from_deck(deck)
                             if drawn_card is None:
                                 print("Couldn't draw from deck")
                             else:
-                                print(f"You drew: {drawn_card}")
+                                if not self.is_bot or game_settings["supervise_bots"]:
+                                    print("You drew: " + convert_card_format(drawn_card))
                             has_drawn = True
-                            self.print_state()
+                            if not self.is_bot or game_settings["supervise_bots"]:
+                                self.print_state()
                             continue
-                    elif index < -1:
-                        raise IndexError("Negative Index")
+                    # elif index < -1:
+                    #     raise IndexError("Negative Index")
                     else: # Selected a card
                         if game.can_place_card(self.cards[index]):
-                            print(f"Played {self.cards.index}")
-                            self.play_card(game, index)
+                            print("Played " + convert_card_format(self.cards[index]))
+                            self.play_card(game, index, next_color=next_color)
                             break
 
                         else:
@@ -311,8 +402,112 @@ class Hand:
                     print("Repick Card:")
                     self.print_state()
                     continue
-        
             return
+
+def make_card_graphic(card: Card):
+    if not isinstance(card, Card):
+        raise ValueError("Argument is not of type Card")
+    color = str_to_ansi_color[card.type.value]
+    return [
+        color + "┌──┐" + ANSI_RESET,
+        color + f"│{card.value: two_char}│" + ANSI_RESET,
+        color + "└──┘" + ANSI_RESET
+    ]
+class GraphicalPrintLine:
+    def __init__(self, init_param: "str | Card | GraphicalPrintLine"):
+        self.lines = [[""] for _ in range(3)]
+        if isinstance(init_param, str):
+            self.lines[0] = " " * len(init_param)
+            self.lines[1] = init_param
+            self.lines[2] = " " * len(init_param)
+
+        elif isinstance(init_param, Card):
+            card_graphic = make_card_graphic(init_param)
+            self.lines = card_graphic
+
+        elif isinstance(init_param, GraphicalPrintLine):
+            self.lines = init_param.lines.copy()
+        else:
+            raise ValueError(f"Unsupported argument of type {type(init_param)}")
+
+    def __add__(self, other: "str | Card | GraphicalPrintLine"):
+        new_obj = GraphicalPrintLine(self)
+
+        if isinstance(other, str):
+            new_obj.lines[0] += " " * len(other)
+            new_obj.lines[1] += other
+            new_obj.lines[2] += " " * len(other)
+        elif isinstance(other, Card):
+            card_graphic = make_card_graphic(other)
+            for i in range(len(self.lines)):
+                new_obj.lines[i] += card_graphic[i]
+        elif isinstance(other, GraphicalPrintLine):
+            new_obj.lines = [new_obj.lines[i] + other.lines[i] for i in range(len(new_obj.lines))]
+        else:
+            return NotImplemented
+        return new_obj
+    def __radd__(self, other: str | Card):
+        new_obj = GraphicalPrintLine(self)
+
+        if isinstance(other, str):
+            new_obj.lines[0] = " " * len(other) + self.lines[0]
+            new_obj.lines[1] = other + self.lines[1]
+            new_obj.lines[2] =  " " * len(other) + self.lines[2]
+        elif isinstance(other, Card):
+            card_graphic = make_card_graphic(other)
+            new_obj.lines = [card_graphic[i] + new_obj.lines[i] for i in range(len(card_graphic))]
+        else:
+            return NotImplemented
+        return new_obj
+    
+    def __str__(self):
+        final_list = ["" for _ in range(3)]
+        i0, i1, i2 = 0, 1, 2
+        terminal_width = shutil.get_terminal_size(fallback=(60,24)).columns
+        visible_width = 0
+        in_ansi = False
+        for chars in zip(*self.lines):
+            if "\033" in chars:
+                in_ansi = True
+            at_card_start = ("\033" in chars) or (not in_ansi and ("┌" in chars or "└" in chars))
+            force_newline = at_card_start and visible_width > terminal_width-10
+
+            if "\n" in chars or force_newline:
+                if final_list[-1].strip() == "" and final_list[-3].strip() == "":
+                    del final_list[-3]
+                    del final_list[-1]
+                    i0 -= 2
+                    i1 -= 2
+                    i2 -= 2
+                final_list.extend(["" for _ in range(3)])
+                i0 += 3
+                i1 += 3
+                i2 += 3
+                visible_width = 0
+
+            if "\n" not in chars:
+                final_list[i0] += chars[0]
+                final_list[i1] += chars[1]
+                final_list[i2] += chars[2]
+                if not in_ansi:
+                    visible_width += 1
+
+            if in_ansi and "m" in chars:
+                in_ansi = False
+            
+
+        if final_list[-1].strip() == "" and final_list[-3].strip() == "":
+            del final_list[-3]
+            del final_list[-1]
+
+        final_str = "\n".join(final_list)
+        return final_str
+
+def convert_card_format(card: Card):
+    if not game_settings["enable_unicode_graphics"]:
+        return str(card)
+    else:
+        return GraphicalPrintLine(card)
 
 def user_select_number_in_range(prompt: str, min: int, max: int):
     while True:
@@ -331,20 +526,20 @@ def user_select_number_in_range(prompt: str, min: int, max: int):
         return num
 
 def print_welcome():
-    print(ANSI_CLEAR, end="", flush=True)
+    print(ANSI_CLEAR_SCREEN, end="", flush=True)
     print("Welcome To Terminal-Based UNO")
     print()
     print("Default Settings:")
-    print(f"  Number of players: {len(game_settings["players"])}")
-    print(f"  Number of bots: {game_settings["num_bots"]}")
-    print(f"  ...")
+    print(f"  Number of players: {len(game_settings['players'])}")
+    print(f"  Number of bots: {game_settings['num_bots']}")
+    print(f"  Unicode Card Graphics: {'Enabled' if game_settings['enable_unicode_graphics'] else 'Disabled'} (Disable if your terminal doesn't support UTF-8/ANSI colors and shows gibberish)")
+    print(f"  (Navigate to \"Edit Settings\" to view all settings)")
     print()
     input("Press Enter to continue")
 
-
 def game_menu():
     while True:
-        print(ANSI_CLEAR, end="", flush=True)
+        print(ANSI_CLEAR_SCREEN, end="", flush=True)
         print("Game Menu:")
         options = [
             ["Play game", init_game],
@@ -358,34 +553,41 @@ def game_menu():
         index = user_select_number_in_range("Select an option: ", 1, len(options)) - 1
         options[index][1]()
             
-
 def edit_settings():
     global game_settings
 
     while True:
-        print(ANSI_CLEAR, end="", flush=True)
+        print(ANSI_CLEAR_SCREEN, end="", flush=True)
         print("Edit Settings:")
         print(f"  1: Edit Players:")
-        print(f"      Number of Players: {len(game_settings["players"])}")
-        print(f"      Player Names:")
+        print(f"     - Number of Players: {len(game_settings['players'])}")
+        print(f"     - Player Names:")
         for name in game_settings["players"]:
             print(f"        \"{name}\"")
         print()
-        print(f"  2: Number of bots: {game_settings["num_bots"]}")
-
+        print(f"  2: Number of bots: {game_settings['num_bots']}")
+        print(f"  3: Unicode Card Graphics: {'Enabled' if game_settings['enable_unicode_graphics'] else 'Disabled'} \t(Disable if your terminal doesn't support UTF-8/ANSI colors and shows gibberish)")
+        print(f"  4: Bot Supervision: {'Enabled' if game_settings['supervise_bots'] else 'Disabled'} \t(Allows you to view the bot's cards to ensure they're not cheating)")
         
-        option_num = user_select_number_in_range("Select what to edit (0 to exit): ", 0, 2)
-        if option_num == 0:
-            return
-        elif option_num == 1:
-            edit_player_settings()
-        elif option_num == 2:
-            num_bots = user_select_number_in_range("How many bots would you like (0-10)? ", 0, 10)
-            game_settings["num_bots"] = num_bots
+        option_num = user_select_number_in_range("Select what to edit (0 to exit): ", 0, 4)
+        match option_num:
+            case 0:
+                return
+            case 1:
+                edit_player_settings()
+            case 2:
+                num_bots = user_select_number_in_range("How many bots would you like (0-10)? ", 0, 10)
+                game_settings["num_bots"] = num_bots
+            case 3:
+                game_settings["enable_unicode_graphics"] = not game_settings["enable_unicode_graphics"]
+                input(f"Toggled Unicode Card Graphics {'on' if game_settings['enable_unicode_graphics'] else 'off'}\n(Enter to continue)")
+            case 4:
+                game_settings["supervise_bots"] = not game_settings["supervise_bots"]
+                input(f"Toggled Bot Supervision {'on' if game_settings['supervise_bots'] else 'off'}\n(Enter to continue)")
 
 def edit_player_settings():
     while True:
-        print(ANSI_CLEAR, end="", flush=True)
+        print(ANSI_CLEAR_SCREEN, end="", flush=True)
         print("Player names:")
         for i, name in enumerate(game_settings["players"]):
             print(f"  {i+1}: {name}")
@@ -405,18 +607,18 @@ def edit_player_settings():
                 player_index = user_select_number_in_range("Choose player to edit (0 to exit): ", 0, len(game_settings["players"])) - 1
                 if player_index == -1:
                     continue
-                new_name = input(f"Rename \"{game_settings["players"][player_index]}\" to (Leave blank to cancel): ").strip()
+                new_name = input(f"Rename \"{game_settings['players'][player_index]}\" to (Leave blank to cancel): ").strip()
                 if not new_name:
                     continue
-                game_settings["players"][player_index] = new_name
-                print(f"Player renamed to \"{game_settings["players"][player_index]}\"\n")
+                game_settings['players'][player_index] = new_name
+                print(f"Player renamed to \"{game_settings['players'][player_index]}\"\n")
 
             case 2:
                 name = input("Enter player name (Leave blank to cancel): ").strip()
                 if not name:
                     continue
                 game_settings["players"].append(name)
-                print(f"Added player \"{game_settings["players"][-1]}\"\n")
+                print(f"Added player \"{game_settings['players'][-1]}\"\n")
             
             case 3:
                 player_index = user_select_number_in_range("Choose player to remove (0 to exit): ", 0, len(game_settings["players"])) - 1
@@ -428,35 +630,36 @@ def edit_player_settings():
 
 def init_game():
     global deck, game, players, game_settings, player_index
-    loading_speed = .4
-    print("Preparing Game", end="")
-    for _ in range(3):
-        time.sleep(loading_speed)
-        print(".", end="", flush=True)
-    print()
+    
+    print(ANSI_CLEAR_SCREEN, end="", flush=True)
+    
+    mock_loading("Preparing game", 3)
 
-    print("Shuffling Deck", end="")
+    mock_loading("Shuffling the deck", 3)
     deck = Deck()
     deck.shuffle()
-    for _ in range(3):
-        time.sleep(loading_speed)
-        print(".", end="", flush=True)
-    print()
 
-    print("Selecting starting card", end="")
-    for _ in range(3):
-            time.sleep(loading_speed)
-            print(".", end="", flush=True)
-    print()
+    players.clear()
+    for name in game_settings["players"]:
+        players.append([name, Hand(deck=deck)])
 
+    if game_settings["num_bots"] > 0:
+        mock_loading("Booting up bots", 3)
+    for i in range(game_settings["num_bots"]):
+        players.append([f"Bot{i+1}", Hand(deck=deck, is_bot=True)])
+
+    player_index = 0
+    mock_loading("Passing out cards", 3)
+
+    mock_loading("Selecting starting card", 3)
     card: Card | None = deck.get_top_card()
     if card is None:
         raise RuntimeError("Can't pick starting card: Deck is empty")
 
     rejected_starting_cards = []
     while card.type == Card.Type("special") or card.value not in [Card.Value(i) for i in range(10)]:
-        print(f"{card} rejected as starting card")
-        time.sleep(loading_speed*2)
+        print(convert_card_format(card) + " rejected as starting card")
+        time.sleep(LOADING_TIME*2)
         rejected_starting_cards.append(card)
         card = deck.get_top_card()
         if card is None:
@@ -465,18 +668,15 @@ def init_game():
     while len(rejected_starting_cards) > 0:
         deck.return_card_to_bottom(rejected_starting_cards.pop(0))
 
-    print(f"Starting card: {card}\n")
-    time.sleep(loading_speed*2)
+    print("Starting card: " + convert_card_format(card) + "\n")
+    time.sleep(LOADING_TIME*2)
 
+    mock_loading("Starting game", 3)
     game = Game(card)
     deck.game_pile = game
 
-    players.clear()
-    for name in game_settings["players"]:
-        players.append([name, Hand(deck=deck)])
-
-    player_index = 0
-
+    
+    print()
     game_loop()
 
 def game_loop():
@@ -489,19 +689,21 @@ def game_loop():
 
         player = players[player_index]
         print(f"{player[0]}'s turn")
-        input("Start Turn? (Enter to continue)")
+        if not player[1].is_bot:
+            input("Start Turn? (Enter to continue)")
 
         player[1].play_turn(game, deck)
 
         input("\nEnd Turn? (Enter to continue)")
-        print(ANSI_CLEAR, end="", flush=True)
+        print(ANSI_CLEAR_SCREEN, end="", flush=True)
         if game.direction_recently_reversed:
             if len(players) == 2:
                 game.skip_next_player = True
             game.direction_recently_reversed = False
 
         if len(player[1].cards) == 0:
-            print(f"{player[0]} wins")
+            print(f"{player[0]} wins!!!!!!")
+            input("(Enter to continue)")
             break
     
         player_index += game.dir
@@ -528,7 +730,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         quit_game()
 
-# TODO: Better card visualization (e.g. ascii art + colored text vs "red 5")
+
+
+# TODO: Add game help/rules panel
 # TODO: Implement logs so players can see what other have done despite secrecy
-# TODO: Bots
+# TODO: Implement assisted playing: computer will determine playable cards, show them to the player, and auto move if there is only one choice
 
