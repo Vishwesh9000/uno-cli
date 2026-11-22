@@ -342,7 +342,10 @@ class Hand:
                                     "Asking ChatGPT for advice",
                                     "Simulating 14,000,605 outcomes",
                                     "Consulting StackOverflow",
-                                    "Bribing the random number generator"
+                                    "Bribing the random number generator",
+                                    "Swapping out my cards ;)",
+                                    "Injecting a virus ;)",
+                                    "Training a neural network on your playstyle"
                                 ])
                                 mock_loading(bot_message, 3)
                                 if self.cards[index].type == Card.Type("special"):
