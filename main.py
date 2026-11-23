@@ -466,7 +466,7 @@ class GraphicalPrintLine:
     def __str__(self):
         final_list = ["" for _ in range(3)]
         i0, i1, i2 = 0, 1, 2
-        terminal_width = shutil.get_terminal_size(fallback=(60,24)).columns
+        terminal_width = shutil.get_terminal_size(fallback=(100,24)).columns
         visible_width = 0
         in_ansi = False
         for chars in zip(*self.lines):
