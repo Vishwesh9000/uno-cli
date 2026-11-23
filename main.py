@@ -503,7 +503,7 @@ class GraphicalPrintLine:
             del final_list[-3]
             del final_list[-1]
 
-        final_str = "\n".join(final_list)
+        final_str = ("\n" + ANSI_RESET).join(final_list)
         return final_str
 
 def convert_card_format(card: Card):
