@@ -260,8 +260,9 @@ class Deck:
         random.shuffle(self.cards)
 
 class Hand:
-    def __init__(self, cards: Iterable[Card] | None = None, deck: Deck | None = None, is_bot: bool = False):
+    def __init__(self, cards: Iterable[Card] | None = None, deck: Deck | None = None, is_bot: bool = False, bot_name: str | None = None):
         self.is_bot: bool = is_bot
+        self.bot_name: str | None = bot_name
         if cards:
             self.cards: list[Card] = list(cards)
         elif deck is not None:
@@ -324,7 +325,6 @@ class Hand:
             # Loop until complete turn
             has_drawn: bool = False
             while True:
-                index = 0
                 try:
                     index = -1
                     next_color: Card.Type | None = None
@@ -344,10 +344,9 @@ class Hand:
                                     "Consulting StackOverflow",
                                     "Bribing the random number generator",
                                     "Swapping out my cards ;)",
-                                    "Injecting a virus ;)",
                                     "Training a neural network on your playstyle"
                                 ])
-                                mock_loading(bot_message, 3)
+                                mock_loading(f"{self.bot_name if self.bot_name else 'Bot'}: {bot_message}", 3)
                                 if self.cards[index].type == Card.Type("special"):
                                     card_counts: dict[str, int] = {color: 0 for color in card_types[0:-1]}
                                     for card in self.cards:
@@ -654,7 +653,7 @@ def init_game():
     if game_settings["num_bots"] > 0:
         mock_loading("Booting up bots", 3)
     for i in range(game_settings["num_bots"]):
-        players.append([f"Bot{i+1}", Hand(deck=deck, is_bot=True)])
+        players.append([f"Bot{i+1}", Hand(deck=deck, is_bot=True, bot_name=f"Bot{i+1}")])
 
     player_index = 0
     mock_loading("Passing out cards", 3)
